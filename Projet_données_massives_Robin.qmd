@@ -1,0 +1,548 @@
+---
+jupyter: python3
+---
+
+```{python}
+#| id: eFbnCogGOvzL
+#| colab: {base_uri: 'https://localhost:8080/', height: 125}
+#| id: eFbnCogGOvzL
+#| outputId: 7f589524-f887-4719-d44d-7dd7a292b616
+---
+title: "Quarto Basics"
+format:
+  html:
+    code-fold: true
+jupyter: python3
+---
+```
+
+```{python}
+#| id: ZfnSbhdICfD5
+#| id: ZfnSbhdICfD5
+import pyspark
+from pyspark import SparkContext
+from pyspark.sql import SparkSession
+#from pyspark.sql.functions import *
+from pyspark.sql import functions as func
+import pandas as pd
+import seaborn as sns
+import numpy as np
+import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.io as pio
+pio.renderers.default = "plotly_mimetype+notebook_connected"
+
+sc = SparkContext.getOrCreate()
+spark = SparkSession.builder.appName("Python Spark").getOrCreate()
+```
+
+```{python}
+#| id: lB8YSvqoCy2z
+#| id: lB8YSvqoCy2z
+df_annual_co2 = spark.read\
+    .option("header", "true")\
+    .csv('Data/annual-co2-emissions-per-country.csv', inferSchema='true')
+
+df_annual_death = spark.read\
+    .option("header", "true")\
+    .csv('Data/annual-number-of-deaths-by-world-region.csv', inferSchema='true')
+
+df_pib = spark.read\
+    .option("header", "true")\
+    .csv('Data/gdp(pib)-per-capita-maddison-2020.csv', inferSchema='true')
+
+df_population = spark.read\
+    .option("header", "true")\
+    .csv('Data/population-world.csv', inferSchema='true')
+
+df_nb_wo_clean_cooking_fuel = spark.read\
+    .option("header", "true")\
+    .csv('Data/number-without-clean-cooking-fuel.csv', inferSchema='true')
+
+df_pop_growth = spark.read\
+    .option("header", "true")\
+    .csv('Data/population-growth-rate-vs-median-age.csv', inferSchema='true')
+
+df_co2_target = spark.read\
+    .option("header", "true")\
+    .csv('Data/net-zero-target-set.csv', inferSchema='true')
+
+df_continent = spark.read\
+    .option("header", "true")\
+    .csv('Data/countryContinent.csv', inferSchema='true')
+
+df_iso_alpha = spark.read\
+    .option("header", "true")\
+    .csv('Data/iso_alpha.csv', inferSchema='true')
+
+```
+
+```{python}
+#| id: o29uWQPDK_8M
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: o29uWQPDK_8M
+#| outputId: 34c18fe7-3c16-4658-c399-42150d5cc3b9
+df_annual_co2.printSchema()
+df_annual_death.printSchema()
+df_pib.printSchema()
+df_population.printSchema()
+df_nb_wo_clean_cooking_fuel.printSchema()
+df_pop_growth.printSchema()
+df_co2_target.printSchema()
+df_continent.printSchema()
+```
+
+```{python}
+#| id: OrcKkBIYDX5P
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: OrcKkBIYDX5P
+#| outputId: d0a895fe-f9bc-4542-aa3c-1b463c724712
+df_annual_co2.show(1)
+df_annual_death.show(1)
+df_pib.show(1)
+df_population.show(1)
+df_nb_wo_clean_cooking_fuel.show(1)
+df_pop_growth.show(1)
+df_co2_target.show(1)
+df_continent.show(1)
+```
+
+# Création des dataframes
+
+```{python}
+#| id: 9C-Ds-aUzYPr
+#| id: 9C-Ds-aUzYPr
+#Join global en inner donc perte de données (seulement jusqu'à 2018)
+df_all = df_annual_co2.join(df_annual_death, (df_annual_co2['Code'] == df_annual_death['Code']) \
+             & (df_annual_co2['Year'] == df_annual_death['Year']), 'inner')\
+         .select(df_annual_co2['Entity'].alias('Country'), df_annual_co2['Code'], df_annual_co2['Year'],\
+             df_annual_co2['Annual CO2 emissions'].alias('Annual_CO2_emissions'),\
+             df_annual_death['Deaths - sex: all - age: all - variant: estimates'].alias('Deaths'))\
+
+df_all = df_all.join(df_pib, (df_all['Code'] == df_pib['Code']) \
+             & (df_all['Year'] == df_pib['Year']), 'inner')\
+         .select(df_all['Country'], df_all['Code'], df_all['Year'], df_all['Annual_CO2_emissions'],\
+             df_all['Deaths'],df_pib['GDP per capita'].alias('PIB_per_capita'))
+
+df_all = df_all.withColumn('PIB_per_capita', func.round(df_all['PIB_per_capita'],2)) # vire les décimales
+
+df_all = df_all.join(df_population, (df_all['Code'] == df_population['Code']) \
+             & (df_all['Year'] == df_population['Year']), 'inner')\
+         .select(df_all['Country'], df_all['Code'], df_all['Year'], df_all['Annual_CO2_emissions'],\
+             df_all['Deaths'],df_all['PIB_per_capita'], df_population['Population - Sex: all - Age: all - Variant: estimates'].alias('Population'))
+         
+df_all = df_all.join(df_pop_growth, (df_all['Code'] == df_pop_growth['Code']) \
+             & (df_all['Year'] == df_pop_growth['Year']), 'inner')\
+         .select(df_all['Country'], df_all['Code'], df_all['Year'], df_all['Annual_CO2_emissions'],\
+             df_all['Deaths'],df_all['PIB_per_capita'], df_all['Population'],\
+             df_pop_growth['Estimates, 1950 - 2020: Annually interpolated demographic indicators - Rate of natural increase (per 1,000 population)']\
+             .alias('Rate_of_natural_population_increase'))
+
+df_all = df_all.withColumn('Rate_of_natural_population_increase', func.round(df_all['Rate_of_natural_population_increase'],2)) # vire les décimales
+
+df_all = df_all.join(df_co2_target, (df_all['Code'] == df_co2_target['Code']) \
+             #& (df_all['Year'] == df_co2_target['Year'])
+             , 'left')\
+         .select(df_all['Country'], df_all['Code'], df_all['Year'], df_all['Annual_CO2_emissions'],\
+             df_all['Deaths'],df_all['PIB_per_capita'], df_all['Population'], df_all['Rate_of_natural_population_increase'],\
+             df_co2_target['Year'].alias('Net_zero_target'))
+         
+df_all = df_all.join(df_continent, (df_all['Code'] == df_continent['code_3']) #supprime les données 'World' \
+             #& (df_all['Year'] == df_co2_target['Year'])
+             , 'inner')\
+         .select(df_all['Country'], df_all['Code'], df_all['Year'], df_all['Annual_CO2_emissions'],\
+             df_all['Deaths'],df_all['PIB_per_capita'], df_all['Population'], df_all['Rate_of_natural_population_increase'],\
+             df_all['Net_zero_target'], df_continent['continent'], df_continent['sub_region'] )
+
+df_all = df_all.join(df_iso_alpha, (df_all['Code'] == df_continent['code_3']) #supprime les données 'World' \
+             #& (df_all['Year'] == df_co2_target['Year'])
+             , 'inner')\
+         .select(df_all['Country'], df_all['Code'], df_all['Year'], df_all['Annual_CO2_emissions'],\
+             df_all['Deaths'],df_all['PIB_per_capita'], df_all['Population'], df_all['Rate_of_natural_population_increase'],\
+             df_all['Net_zero_target'], df_continent['continent'], df_continent['sub_region'] )
+
+
+
+###########################################
+#Join avec données jusqu'à 2020 : emmission C02, population, continent
+
+
+df_pop = df_annual_co2.join(df_population, (df_annual_co2['Code'] == df_population['Code']) \
+             & (df_annual_co2['Year'] == df_population['Year']), 'outer')\
+         .select(df_annual_co2['Entity'].alias('Country'), df_annual_co2['Code'], df_annual_co2['Year'],\
+                 df_annual_co2['Annual CO2 emissions'].alias('Annual_CO2_emissions'),\
+                 df_population['Population - Sex: all - Age: all - Variant: estimates'].alias('Population'))
+         
+df_pop = df_pop.join(df_continent, (df_pop['Code'] == df_continent['code_3']) #supprime les données 'World' \
+             #& (df_all['Year'] == df_co2_target['Year'])
+             , 'outer')\
+         .select(df_pop['Country'], df_pop['Code'], df_pop['Year'], df_pop['Annual_CO2_emissions'],\
+             df_pop['Population'], df_continent['continent'], df_continent['sub_region'] )
+
+df_pop = df_pop.where(df_all.Year>1949)
+
+
+##############################################
+
+df_world_cO2 = df_annual_co2.filter((df_annual_co2.Entity == 'World') | (df_annual_co2.Entity =='China')\
+                                    | (df_annual_co2.Entity =='United States') | (df_annual_co2.Entity =='India')\
+                                    | (df_annual_co2.Entity =='Russia')).select(df_annual_co2['Entity'].alias('Country'),\
+                                      df_annual_co2['Code'], df_annual_co2['Year'], df_annual_co2['Annual CO2 emissions'].alias('Annual_CO2_emissions'))
+```
+
+## Data cleaning
+
+```{python}
+#| id: _K-oWhNIQTPd
+#| id: _K-oWhNIQTPd
+#Suppression de la ligne avec Code = DMA (contient une valeur null)
+cond = (df_all.Code == 'DMA')
+df_all = df_all.filter(~cond)
+
+#Pareil pour 'World'
+cond = (df_all.Code == 'OWID_WRL')
+df_all = df_all.filter(~cond)
+```
+
+```{python}
+#| id: bg0f310CKm67
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: bg0f310CKm67
+#| outputId: 38375c6b-9dc2-4b8b-989e-5c3487869a2b
+#On vérifie que les 'pays' Dominica et World ont bien disparu
+df_all.filter(df_all.Code =='DMA').show(truncate=False)
+df_all.filter(df_all.Code == 'OWID_WRL').show()#.select(countDistinct(df_all.Year)).show()
+```
+
+## Visu en interne : data
+
+```{python}
+#| id: qFVYu6nUI8ym
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: qFVYu6nUI8ym
+#| outputId: 4ea425b2-e700-4bc4-c903-442b051e6a2f
+#nombre total de pays répértoriés
+df_all.select(func.countDistinct('Country')).show(truncate=False)
+```
+
+```{python}
+#| id: r2r2BknrIbDp
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: r2r2BknrIbDp
+#| outputId: 89b70299-2fad-40e2-e3fa-22d718e659b8
+#rechercher cb de pays sur 163 ont l'info pour une année donnée
+annee = 2000
+df_all.filter(df_all.Year==annee).select(func.count('Year')).collect()[0][0]
+
+#à partir de l'année
+#1950 : on a 117 pays avec toutes les infos
+#1960 : on a 141 pays avec toutes les infos
+#1970 : on a 144 pays avec toutes les infos
+#1980 : on a 159 pays avec toutes les infos
+#1990 : on a 163 pays avec toutes les infos
+#2000 : tous les pays : 164
+```
+
+```{python}
+#| id: fxCSsMElRobp
+#| colab: {base_uri: 'https://localhost:8080/', height: 645}
+#| id: fxCSsMElRobp
+#| outputId: 308732d1-3f06-4faf-f065-f4c1505cd589
+#visualisation de l'évolution du nombre de pays pour lesquels nous avons toutes les informations#
+fig = plt.figure(figsize=(4,3), dpi = 150)
+annees = []
+pays_w_infos = []
+for annee in range(1950,2010,10):
+  info = df_all.filter(df_all.Year==annee).select(func.count('Year')).collect()[0][0]
+  annees.append(annee)
+  pays_w_infos.append(info)
+
+new_lst = [list(x) for x in zip(annees, pays_w_infos)]
+
+columns = ["year","pays_w_infos"]
+df_intro = spark.createDataFrame(data=new_lst, schema = columns)
+#df_intro.printSchema()
+#df_intro.show(truncate=False)
+
+df_intro_pd = df_intro.toPandas()
+sns.set_style("darkgrid")
+sns.lineplot(data=df_intro_pd, x="year", y="pays_w_infos").set(title='Number of countries for which we have data from one year',\
+                                                          ylabel='Number of countries with data', xlabel='Year')
+```
+
+```{python}
+#| id: 4ap4WL0iNzhF
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: 4ap4WL0iNzhF
+#| outputId: 39fbfed6-22ee-46f6-da4c-f5da60dbd9b9
+#Vérification de la suppression de la l'unique ligne DMA en 2014
+df_pop_growth.filter((df_pop_growth.Year=='2014')&(df_pop_growth.Code=='DMA')).show(truncate=False)
+```
+
+```{python}
+#| id: 1rB8zv-62eUG
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: 1rB8zv-62eUG
+#| outputId: 5abbc760-4775-4932-af29-fcd1ffbf4cc1
+#Aperçu France
+df_all.filter(df_all.Code == 'FRA').show(5, truncate=False)
+```
+
+```{python}
+#| id: Z_-uBW1HCbM4
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: Z_-uBW1HCbM4
+#| outputId: be385062-f4b1-4d92-c9b7-5eae67918d42
+#nombre de pays dont on a la donnée objectif 0 emissions
+df_all.filter(df_all.Net_zero_target.isNotNull()).select(func.countDistinct("Country")).show(truncate=False)
+```
+
+Essayer de selectionner seulement les 50 premiers pays polluants pour la visu car bcp trop ne polluent pas et prennent de la place sur la visu pour rien
+
+```{python}
+#| id: KvdjKb4q73FD
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: KvdjKb4q73FD
+#| outputId: ef4b59e8-508c-46dd-e5f5-4458a91b1341
+df = df_all.filter(df_all.Year == 2018).orderBy(func.desc('Annual_CO2_emissions')).select(df_all.Country).rdd.map(lambda x: x[0]).collect()
+df[:5]
+```
+
+## Transformation df_all vers pandas pour visu
+
+```{python}
+#| id: jJQau1hg652C
+#| id: jJQau1hg652C
+df_all_pd = df_all.toPandas() #df plein
+#df_all_2000_pd = df_all_2000.toPandas() #df test avec année min selectionnée au dessus
+```
+
+## Visu 1 : World C02 emission
+
+```{python}
+#| id: vSKr-UfqTWMr
+#| colab: {base_uri: 'https://localhost:8080/', height: 542}
+#| id: vSKr-UfqTWMr
+#| outputId: 0d387595-7d92-4a92-c155-8bb464a53999
+df = df_world_cO2.toPandas()
+fig = px.line(df, x="Year", y='Annual_CO2_emissions', color='Country', \
+              title='Carbon dioxide (CO2) emissions from fossil, fuels and industry',\
+             labels={'Annual_CO2_emissions':'CO2 emission (billions of t)'})
+
+fig.update_xaxes(range=[1820, 2022])
+fig.show()
+```
+
+```{python}
+df_all.columns
+```
+
+```{python}
+df_all_pd[df_all_pd['Country'] == 'France']
+```
+
+```{python}
+#| scrolled: false
+df = df_pop.toPandas()
+fig = px.bar(df, x='Year', y='Population', color='continent', hover_data=['Country'],\
+            title = "Evolution de la population mondiale")
+
+
+fig.show()
+```
+
+```{python}
+#| scrolled: false
+df2018 = df_all_pd.query('Year == 2018')
+
+fig = px.histogram(df2018, x = 'Annual_CO2_emissions', color = 'continent', marginal = 'rug', hover_name = 'Country',\
+            hover_data = df2018.columns, \
+            title = "Distribution of C02 emission rates in 2018", labels={'Annual_CO2_emissions':'CO2 emission (billions of t)', 'count':'Nombre de pays'})
+fig.show()
+```
+
+
+```{python}
+CO2_p_hab = df2018['Annual_CO2_emissions']/df2018['Population']
+#df2018['CO2_hab'] = CO2_p_hab
+fig = px.sunburst(df2018, path=['continent', 'Country'], color=CO2_p_hab,
+           hover_data =df2018.columns, values='PIB_per_capita',
+           title = 'Emission en C02 par habitant, classement selon PIB par habitant')
+
+fig.show()
+```
+
+```{python}
+px.choropleth(df2018, locations="Code", color="Annual_CO2_emissions",
+             hover_data=df2018.columns)
+```
+
+```{python}
+#df2018.sort_values("CO2_hab", ascending = False)
+df1 = df2018
+df1 = df1.loc[df1["Population"] >=5000000]
+df1.sort_values("CO2_hab", ascending = False)
+len(df1)
+```
+
+```{python}
+#| id: v7uNZEqLV7tR
+#| id: v7uNZEqLV7tR
+#selection des colonnes uniquement utilisées pour voir si ça marche mieux mais tester sans ça
+df_all_pd['Year'] = df_all_pd['Year'].astype('int')
+df_all_pd['Year'] = df_all_pd['Year'].astype('category')
+#df_all_pd = df_all_pd[["Country", "Year", "Annual_CO2_emissions"]]
+```
+
+```{python}
+#| id: sboHXg2MWKGP
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: sboHXg2MWKGP
+#| outputId: 41729dcd-618d-4f27-c9ec-c9827bed36c6
+df_all_pd.dtypes
+```
+
+```{python}
+#| id: Uaa3V996JuTB
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: Uaa3V996JuTB
+#| outputId: d75bb8ac-9fc9-47e7-f276-3b7578e4732e
+len(df_all_pd)
+```
+
+```{python}
+#| id: OpjO3gyPWXex
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: OpjO3gyPWXex
+#| outputId: c965d169-b6b1-40ee-84cd-aac9e07a0ffd
+len(df_all_pd['Country'].unique())
+```
+
+## THEODORE
+
+```{python}
+#| id: fCCyDt10YT2-
+#| colab: {base_uri: 'https://localhost:8080/', height: 201}
+#| id: fCCyDt10YT2-
+#| outputId: f49be31f-4055-4d77-fcbe-3fd6aa8a6d62
+temp = df_all.filter(df_all.Year==2000).groupBy('continent').sum('Annual_CO2_emissions','Population').collect()
+
+lst_all = []
+for annee in range(1950,2018,1):
+  lst_temp = []
+  temp = df_all.filter(df_all.Year==annee).groupBy('continent').sum('Annual_CO2_emissions').collect()
+  lst_temp.append(annee)
+  lst_temp.append(temp[0][1])
+  lst_temp.append(temp[1][1])
+  lst_temp.append(temp[2][1])
+  lst_temp.append(temp[3][1])
+  lst_temp.append(temp[4][1])
+  lst_all.append(lst_temp)
+
+columns_continent= ['Year','Europe','Afrique','Amérique','Oceanie','Asie']
+df_continent = spark.createDataFrame(data=lst_all, schema = columns_continent)
+#pivot des données en pyspark
+df_continent_pd = df_continent.withColumnRenamed("Amérique","Amerique")
+df_continent_pd = df_continent_pd.selectExpr(\
+        'Year', 'stack(5, "Europe", Europe, "Afrique", Afrique, "Amerique", Amerique, "Oceanie", Oceanie, "Asie", Asie) as (Continent, Annual_CO2_Emissions)')
+```
+
+```{python}
+#| id: TMpro3yhY5sF
+#| colab: {base_uri: 'https://localhost:8080/', height: 542}
+#| id: TMpro3yhY5sF
+#| outputId: c83a765f-b3fe-48d6-93b5-b52f3a680fb4
+df = df_continent_pd.toPandas()
+fig = px.line(df, x="Year", y='Annual_CO2_Emissions', color='Continent', title='CO2 emissions by continent since 1950',\
+             labels={'Annual_CO2_Emissions':'CO2 emission (billions of t)'})
+
+fig.show()
+```
+
+## Visu 2 = Emissions C02 pour les N pays les plus polluants
+
+## Test visu sur nombre de pays limité avant d'appliquer sur all (à supprimer une fois all fonctionnel)
+
+```{python}
+#| id: l2wdI1HQ8o9n
+#| colab: {base_uri: 'https://localhost:8080/', height: 1000}
+#| id: l2wdI1HQ8o9n
+#| outputId: 0fc1609d-54f9-454a-f36e-180826b76515
+#| scrolled: false
+n = input("Please enter number n of most polluting countries...:\n") #nbr de pays les plus polluants à afficher
+n = int(n)
+
+#En pyspark, liste des n pays les plus émetteurs de C02 en 2018
+c_list = df_all.filter(df_all.Year == 2018).orderBy(func.desc('Annual_CO2_emissions')).select(df_all.Country).rdd.map(lambda x: x[0]).collect()
+c_list = c_list[:n]
+
+#En pyspark avant conversion pandas, sélectionner seulement les pays compris dans n
+df_list_pd = df_all[df_all.Country.isin(c_list)].orderBy(func.desc('Annual_CO2_emissions')).select(df_all.Country, df_all.Year, (df_all.Annual_CO2_emissions / 1000000000).alias("Annual_CO2_emissions")).toPandas()
+
+
+#####Partie plot
+
+df = df_list_pd
+
+sns.set_theme(style="dark")
+
+# Plot each year's time series in its own facet
+g = sns.relplot(
+    data=df,
+    x="Year", y="Annual_CO2_emissions", col="Country", hue="Country",
+    kind="line", palette="crest", linewidth=4, zorder=5,
+    col_wrap=1, height=4, aspect=5.5, legend=False
+)
+
+# Iterate over each subplot to customize further
+for country, ax in g.axes_dict.items():
+
+    # Add the title as an annotation within the plot
+    ax.text(.65, 1, country, transform=ax.transAxes, fontweight="bold")
+
+    # Plot l'émission des n pays en fond
+    sns.lineplot(
+        data=df, x="Year", y="Annual_CO2_emissions", units="Country",
+        estimator=None, color="0.7", linewidth=0.5, ax=ax, legend='full'
+    )
+
+    #Plot la moyenne entre les n pays sélectionnés
+    sns.lineplot(
+        data=df, x="Year", y="Annual_CO2_emissions",
+        estimator=np.mean, color="r", linewidth=1.5, ax=ax, ci=None
+    )
+
+
+# Reduce the frequency of the x axis ticks
+ax.set_xticks(ax.get_xticks()[::2])
+
+# Tweak the supporting aspects of the plot
+g.set_titles("")
+#g.set_title(f"Emission en C02 depuis 1950 des {n} pays les plus polluants en 2018 \n \n \n")
+g.set_axis_labels("Year", "CO2 (billions of t)")
+g.tight_layout()
+```
+
+```{python}
+#| id: wBH3KtPpSyL5
+#| colab: {base_uri: 'https://localhost:8080/', height: 542}
+#| id: wBH3KtPpSyL5
+#| outputId: 1f7a8969-7a49-454a-897d-c41ecb0b3c19
+# Using graph_objects
+import plotly.graph_objects as go
+
+import pandas as pd
+df = pd.read_csv('https://raw.githubusercontent.com/plotly/datasets/master/finance-charts-apple.csv')
+
+fig = go.Figure([go.Scatter(x=df['Date'], y=df['AAPL.High'])])
+fig.show()
+```
+
+```{python}
+#| id: Ed8ay8R6OK0R
+#| colab: {base_uri: 'https://localhost:8080/'}
+#| id: Ed8ay8R6OK0R
+#| outputId: c9c790aa-a3b5-4652-fd45-d8b469462f19
+!pip install dash
+```
+
